@@ -131,13 +131,41 @@
             color: #888;
             margin-top: 10px;
         }
+        .file-input-area {
+            border: 2px dashed #555;
+            border-radius: 6px;
+            padding: 20px;
+            text-align: center;
+            margin-bottom: 15px;
+            transition: border-color 0.2s;
+            cursor: pointer;
+        }
+        .file-input-area:hover, .file-input-area.dragover {
+            border-color: #888;
+        }
+        .file-input-area input[type="file"] {
+            display: none;
+        }
+        .save-btn {
+            margin-top: 10px;
+            background: #4a7c59;
+            color: #fff;
+            display: none;
+        }
+        .save-btn:hover {
+            background: #5a8c69;
+        }
     </style>
 </head>
 <body>
     <h1>WireGuard AllowedIPs Generator</h1>
-    
+
     <div class="section">
         <h2>1. Paste Your WireGuard Configuration (Optional)</h2>
+        <div class="file-input-area" onclick="document.getElementById('fileInput').click()" ondrop="handleDrop(event)" ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)">
+            <input type="file" id="fileInput" accept=".conf,.txt" onchange="handleFileSelect(event)">
+            📁 Drag config file here or click to select
+        </div>
         <textarea id="configInput" placeholder="[Interface]
 PrivateKey = ...
 Address = 10.0.0.2/32
@@ -179,7 +207,7 @@ If left empty, only the AllowedIPs line will be generated."></textarea>
                 <label for="list-rutracker">Rutracker</label>
             </div>
         </div>
-        
+
         <div class="custom-lists">
             <h2>Custom Lists (one URL per line)</h2>
             <textarea id="customLists" placeholder="https://github.com/user/repo/blob/main/ips.bat
@@ -197,6 +225,7 @@ https://raw.githubusercontent.com/user/repo/main/ips.txt"></textarea>
         <h2>3. Result</h2>
         <textarea id="output" readonly placeholder="Generated configuration will appear here..."></textarea>
         <button class="copy-btn" onclick="copyOutput()">Copy to Clipboard</button>
+        <button class="save-btn" id="saveBtn" onclick="saveConfig()">Save Configuration</button>
         <p class="info">The result replaces <code>AllowedIPs = 0.0.0.0/0, ::/0</code> with the specific IP ranges from selected lists.</p>
     </div>
 
@@ -257,7 +286,7 @@ https://raw.githubusercontent.com/user/repo/main/ips.txt"></textarea>
         async function fetchList(url) {
             const rawUrl = convertToRawUrl(url);
             if (!rawUrl) return [];
-            
+
             try {
                 const response = await fetch(rawUrl);
                 if (!response.ok) {
@@ -276,11 +305,11 @@ https://raw.githubusercontent.com/user/repo/main/ips.txt"></textarea>
             const btn = document.getElementById('generateBtn');
             const status = document.getElementById('status');
             const output = document.getElementById('output');
-            
+
             btn.disabled = true;
             status.className = 'status loading';
             status.textContent = 'Fetching IP lists...';
-            
+
             try {
                 const urls = [];
                 document.querySelectorAll('#listCheckboxes input[type="checkbox"]:checked').forEach(cb => {
@@ -331,8 +360,8 @@ https://raw.githubusercontent.com/user/repo/main/ips.txt"></textarea>
                         const peerIndex = configLines.findIndex(l => l.trim().toLowerCase() === '[peer]');
                         if (peerIndex !== -1) {
                             let insertIndex = peerIndex + 1;
-                            while (insertIndex < configLines.length && 
-                                   configLines[insertIndex].trim() && 
+                            while (insertIndex < configLines.length &&
+                                   configLines[insertIndex].trim() &&
                                    !configLines[insertIndex].trim().startsWith('[')) {
                                 insertIndex++;
                             }
@@ -341,19 +370,27 @@ https://raw.githubusercontent.com/user/repo/main/ips.txt"></textarea>
                             configLines.push(allowedIpsLine);
                         }
                     }
-                    
+
                     output.value = configLines.join('\n');
                 }
-                
+
                 status.className = 'status success';
                 status.textContent = `Done! Generated ${sortedIps.length} unique IP ranges.`;
-                
+
+                // Show save button if result is a full configuration
+                const saveBtn = document.getElementById('saveBtn');
+                if (isFullConfig(output.value)) {
+                    saveBtn.style.display = 'block';
+                } else {
+                    saveBtn.style.display = 'none';
+                }
+
             } catch (e) {
                 status.className = 'status error';
                 status.textContent = `Error: ${e.message}`;
                 console.error(e);
             }
-            
+
             btn.disabled = false;
         }
 
@@ -361,11 +398,75 @@ https://raw.githubusercontent.com/user/repo/main/ips.txt"></textarea>
             const output = document.getElementById('output');
             output.select();
             document.execCommand('copy');
-            
+
             const btn = event.target;
             const originalText = btn.textContent;
             btn.textContent = 'Copied!';
             setTimeout(() => btn.textContent = originalText, 1500);
+        }
+
+        function handleDragOver(event) {
+            event.preventDefault();
+            event.currentTarget.classList.add('dragover');
+        }
+
+        function handleDragLeave(event) {
+            event.currentTarget.classList.remove('dragover');
+        }
+
+        function handleDrop(event) {
+            event.preventDefault();
+            event.currentTarget.classList.remove('dragover');
+            const files = event.dataTransfer.files;
+            if (files.length > 0) {
+                loadConfigFile(files[0]);
+            }
+        }
+
+        function handleFileSelect(event) {
+            const file = event.target.files[0];
+            if (file) {
+                loadConfigFile(file);
+            }
+        }
+
+        function loadConfigFile(file) {
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                document.getElementById('configInput').value = e.target.result;
+            };
+            reader.readAsText(file);
+        }
+
+        function saveConfig() {
+            const output = document.getElementById('output').value;
+            if (!output.trim()) return;
+
+            const now = new Date();
+            const dateStr = now.toISOString().split('T')[0];
+
+            const selectedServices = [];
+            document.querySelectorAll('#listCheckboxes input[type="checkbox"]:checked').forEach(cb => {
+                const label = cb.nextElementSibling.textContent.toLowerCase();
+                selectedServices.push(label);
+            });
+
+            const servicesSuffix = selectedServices.length > 0 ? selectedServices.join('_') : 'custom';
+            const filename = `wg_${servicesSuffix}_${dateStr}.conf`;
+
+            const blob = new Blob([output], { type: 'text/plain' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }
+
+        function isFullConfig(text) {
+            return text.includes('[Interface]') || text.includes('[Peer]');
         }
     </script>
 </body>
